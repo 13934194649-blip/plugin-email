@@ -17,7 +17,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.simplejavamail.MailException;
+import org.simplejavamail.api.email.Recipient;
 import org.simplejavamail.api.mailer.config.TransportStrategy;
 
 import com.google.common.collect.ImmutableMap;
@@ -39,6 +42,9 @@ import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
 import static io.kestra.core.tenant.TenantService.MAIN_TENANT;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -126,6 +132,90 @@ public class MailSendTest {
         );
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = { ";", ",", "; ", ", " })
+    void shouldPopulateMultipleRecipients(String delimiter) throws Exception {
+        var runContext = getRunContext();
+
+        var mailSend = MailSend.builder()
+            .from(Property.ofValue(FROM))
+            .to(Property.ofValue("user1@mail.com%suser2@mail.com%suser3@mail.com".formatted(delimiter, delimiter)))
+            .cc(Property.ofValue("cc1@mail.com%scc2@mail.com".formatted(delimiter)))
+            .bcc(Property.ofValue("bcc1@mail.com%sbcc2@mail.com".formatted(delimiter)))
+            .subject(Property.ofValue(SUBJECT))
+            .build();
+
+        var builtEmail = mailSend.buildEmail(runContext);
+
+        assertThat(builtEmail.getToRecipients())
+            .extracting(Recipient::getAddress)
+            .containsExactly("user1@mail.com", "user2@mail.com", "user3@mail.com");
+        assertThat(builtEmail.getCcRecipients())
+            .extracting(Recipient::getAddress)
+            .containsExactly("cc1@mail.com", "cc2@mail.com");
+        assertThat(builtEmail.getBccRecipients())
+            .extracting(Recipient::getAddress)
+            .containsExactly("bcc1@mail.com", "bcc2@mail.com");
+    }
+
+    @Test
+    void shouldPopulateNamedRecipientsWhenUsingRfc2822Format() throws Exception {
+        var runContext = getRunContext();
+
+        var mailSend = MailSend.builder()
+            .from(Property.ofValue(FROM))
+            .to(Property.ofValue("\"Smith, Alice\" <alice@example.com>; Bob <bob@example.com>"))
+            .subject(Property.ofValue(SUBJECT))
+            .build();
+
+        var builtEmail = mailSend.buildEmail(runContext);
+
+        assertThat(builtEmail.getToRecipients())
+            .extracting(Recipient::getName, Recipient::getAddress)
+            .containsExactly(
+                tuple("Smith, Alice", "alice@example.com"),
+                tuple("Bob", "bob@example.com")
+            );
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "", "   ", ";", " ; ", ",", " , " })
+    void shouldThrowExceptionWhenToContainsNoRecipient(String emptyTo) {
+        var runContext = getRunContext();
+
+        var mailSend = MailSend.builder()
+            .from(Property.ofValue(FROM))
+            .to(Property.ofValue(emptyTo))
+            .subject(Property.ofValue(SUBJECT))
+            .build();
+
+        assertThatThrownBy(() -> mailSend.buildEmail(runContext))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("with no recipient address");
+    }
+
+    @Test
+    void shouldSendEmailToMultipleRecipients() throws Exception {
+        var runContext = getRunContext();
+
+        var mailSend = MailSend.builder()
+            .host(Property.ofValue("localhost"))
+            .port(Property.ofValue(greenMail.getSmtp().getPort()))
+            .from(Property.ofValue(FROM))
+            .to(Property.ofValue("to1@mail.com; to2@mail.com"))
+            .cc(Property.ofValue("cc1@mail.com, cc2@mail.com"))
+            .bcc(Property.ofValue("bcc1@mail.com; bcc2@mail.com"))
+            .subject(Property.ofValue(SUBJECT))
+            .plainTextContent(Property.ofValue("multi-recipient test"))
+            .transportStrategy(Property.ofValue(TransportStrategy.SMTP))
+            .build();
+
+        mailSend.run(runContext);
+
+        var receivedMessages = greenMail.getReceivedMessages();
+        assertThat(receivedMessages).hasSize(6);
+    }
+
     @Test
     @DisplayName("Send email with html and plain text contents")
     void sendEmail() throws Exception {
@@ -173,11 +263,11 @@ public class MailSendTest {
             .build();
 
         var builtEmail = mailSend.buildEmail(runContext);
-        org.assertj.core.api.Assertions.assertThat(builtEmail.getBccRecipients())
-            .extracting(org.simplejavamail.api.email.Recipient::getAddress)
+        assertThat(builtEmail.getBccRecipients())
+            .extracting(Recipient::getAddress)
             .containsExactly(BCC);
-        org.assertj.core.api.Assertions.assertThat(builtEmail.getCcRecipients())
-            .extracting(org.simplejavamail.api.email.Recipient::getAddress)
+        assertThat(builtEmail.getCcRecipients())
+            .extracting(Recipient::getAddress)
             .containsExactly(CC);
 
         mailSend.run(runContext);
