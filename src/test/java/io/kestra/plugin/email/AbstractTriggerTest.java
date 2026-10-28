@@ -1,5 +1,6 @@
 package io.kestra.plugin.email;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Properties;
 
@@ -12,6 +13,7 @@ import com.icegreen.greenmail.util.ServerSetup;
 
 import io.kestra.core.junit.annotations.KestraTest;
 
+import jakarta.activation.DataHandler;
 import jakarta.mail.*;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeBodyPart;
@@ -24,6 +26,10 @@ public abstract class AbstractTriggerTest extends AbstractEmailTest {
 
     protected static final String ATTACHMENT_FILENAME = "report.txt";
     protected static final String ATTACHMENT_CONTENT = "attachment content";
+    protected static final String PDF_FILENAME = "scan.pdf";
+    protected static final String ICS_CONTENT = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nSUMMARY:Caf\u00e9 meeting\r\nEND:VCALENDAR";
+    protected static final byte[] PNG_CONTENT = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, (byte) 0xFF};
+    protected static final byte[] PDF_CONTENT = "%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n%%EOF\n".getBytes(StandardCharsets.ISO_8859_1);
 
     @RegisterExtension
     static GreenMailExtension greenMail = new GreenMailExtension(
@@ -48,6 +54,22 @@ public abstract class AbstractTriggerTest extends AbstractEmailTest {
         message.addRecipient(Message.RecipientType.TO, new InternetAddress("test@localhost"));
         message.setSubject(subject);
         message.setText(body);
+        greenMail.getUserManager().getUser("test@localhost").deliver(message);
+    }
+
+    protected void sendSinglePartTestEmail(String subject, String from, String filename, byte[] content, String contentType)
+        throws MessagingException {
+        var props = new Properties();
+        var session = Session.getDefaultInstance(props);
+
+        var message = new MimeMessage(session);
+        message.setFrom(new InternetAddress(from));
+        message.addRecipient(Message.RecipientType.TO, new InternetAddress("test@localhost"));
+        message.setSubject(subject);
+        message.setDataHandler(new DataHandler(new ByteArrayDataSource(content, contentType)));
+        if (filename != null) {
+            message.setFileName(filename);
+        }
         greenMail.getUserManager().getUser("test@localhost").deliver(message);
     }
 
