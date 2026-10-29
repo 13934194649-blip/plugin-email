@@ -1,5 +1,6 @@
 package io.kestra.plugin.email;
 
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Properties;
@@ -28,7 +29,7 @@ public abstract class AbstractTriggerTest extends AbstractEmailTest {
     protected static final String ATTACHMENT_CONTENT = "attachment content";
     protected static final String PDF_FILENAME = "scan.pdf";
     protected static final String ICS_CONTENT = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nSUMMARY:Caf\u00e9 meeting\r\nEND:VCALENDAR";
-    protected static final byte[] PNG_CONTENT = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, (byte) 0xFF};
+    protected static final byte[] PNG_CONTENT = { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, (byte) 0xFF };
     protected static final byte[] PDF_CONTENT = "%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n%%EOF\n".getBytes(StandardCharsets.ISO_8859_1);
 
     @RegisterExtension
@@ -54,6 +55,14 @@ public abstract class AbstractTriggerTest extends AbstractEmailTest {
         message.addRecipient(Message.RecipientType.TO, new InternetAddress("test@localhost"));
         message.setSubject(subject);
         message.setText(body);
+        greenMail.getUserManager().getUser("test@localhost").deliver(message);
+    }
+
+    protected void sendRawTestEmail(String rawContent) throws Exception {
+        var message = new MimeMessage(
+            Session.getInstance(new Properties()),
+            new ByteArrayInputStream(rawContent.getBytes(StandardCharsets.US_ASCII))
+        );
         greenMail.getUserManager().getUser("test@localhost").deliver(message);
     }
 

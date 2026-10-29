@@ -196,13 +196,20 @@ public class RealTimeTrigger extends AbstractMailTrigger
                                     break;
 
                                 if (message instanceof MimeMessage mimeMessage) {
-                                    MailService.EmailData emailData = MailService.parseEmailData(mimeMessage, runContext, config.maxAttachmentSize);
-                                    if (emailData != null) {
-                                        runContext.logger().info(
-                                            "IMAP IDLE: New email - Subject: '{}', From: '{}'",
-                                            emailData.getSubject(), emailData.getFrom()
-                                        );
-                                        sink.next(emailData);
+                                    try {
+                                        MailService.EmailData emailData = MailService.parseEmailData(mimeMessage, runContext, config.maxAttachmentSize);
+                                        if (emailData != null) {
+                                            runContext.logger().info(
+                                                "IMAP IDLE: New email - Subject: '{}', From: '{}'",
+                                                emailData.getSubject(), emailData.getFrom()
+                                            );
+                                            sink.next(emailData);
+                                        }
+                                    } catch (Exception ex) {
+                                        // A single unreadable message must not drop the rest of the IDLE batch.
+                                        if (isActive.get()) {
+                                            runContext.logger().warn("Error processing one email in the IDLE batch, skipping it", ex);
+                                        }
                                     }
                                 }
                             }

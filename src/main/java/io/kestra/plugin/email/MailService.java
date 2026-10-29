@@ -296,16 +296,23 @@ public class MailService {
             MimeMultipart multipart = (MimeMultipart) message.getContent();
             return extractTextFromMultipart(multipart);
         }
+
+        // Read text parts from the raw stream instead of getContent(): Jakarta Mail throws
+        // UnsupportedEncodingException for a charset the JVM does not know, while charsetOf()
+        // falls back to UTF-8. This also covers types without a content handler (e.g. text/calendar).
+        if (message.isMimeType("text/*")) {
+            return readText(message);
+        }
         if (message.getContent() instanceof String text) {
             return text;
         }
-        // Types without a content handler (e.g. text/calendar) come back as a raw stream.
-        if (message.isMimeType("text/*")) {
-            try (var in = message.getInputStream()) {
-                return new String(in.readAllBytes(), charsetOf(message));
-            }
-        }
         return "";
+    }
+
+    private static String readText(Part part) throws MessagingException, IOException {
+        try (var in = part.getInputStream()) {
+            return new String(in.readAllBytes(), charsetOf(part));
+        }
     }
 
     private static Charset charsetOf(Part part) {
@@ -328,6 +335,8 @@ public class MailService {
             BodyPart bodyPart = multipart.getBodyPart(i);
             if (bodyPart.isMimeType("multipart/*")) {
                 result.append(extractTextFromMultipart((MimeMultipart) bodyPart.getContent()));
+            } else if (bodyPart.isMimeType("text/*")) {
+                result.append(readText(bodyPart));
             } else {
                 result.append(bodyPart.getContent().toString());
             }
@@ -343,7 +352,9 @@ public class MailService {
         if (message.isMimeType("multipart/*")) {
             MimeMultipart multipart = (MimeMultipart) message.getContent();
             extractAttachmentsFromMultipart(multipart, attachments, runContext, maxAttachmentSize);
-        } else if (isAttachment(message) || !(message.getContent() instanceof String)) {
+        } else if (!message.isMimeType("text/*") && (isAttachment(message) || !(message.getContent() instanceof String))) {
+            // A single-part text message has no attachment. Checking the mime type first avoids
+            // calling getContent() on it, which fails for an unknown charset.
             attachments.add(extractAttachment(message, attachments.size(), runContext, maxAttachmentSize));
         }
 
@@ -526,15 +537,20 @@ public class MailService {
 
                         if (messageDate.isAfter(lastCheckTime)) {
                             isNew = true;
-                            EmailData emailData = parseEmailData(mimeMessage, runContext, maxAttachmentSize);
-                            if (emailData != null) {
-                                newEmails.addFirst(emailData);
-                                runContext.logger().info(
-                                    "New email - Subject: '{}', From: '{}', Body: '{}'",
-                                    emailData.getSubject(), emailData.getFrom(),
-                                    emailData.getBody().length() > 100 ? emailData.getBody().substring(0, 100) + "..."
-                                        : emailData.getBody()
-                                );
+                            try {
+                                EmailData emailData = parseEmailData(mimeMessage, runContext, maxAttachmentSize);
+                                if (emailData != null) {
+                                    newEmails.addFirst(emailData);
+                                    runContext.logger().info(
+                                        "New email - Subject: '{}', From: '{}', Body: '{}'",
+                                        emailData.getSubject(), emailData.getFrom(),
+                                        emailData.getBody().length() > 100 ? emailData.getBody().substring(0, 100) + "..."
+                                            : emailData.getBody()
+                                    );
+                                }
+                            } catch (Exception e) {
+                                // One unreadable message must not stop the whole poll.
+                                runContext.logger().warn("Failed to parse email {}, skipping it", messageNumber, e);
                             }
                         }
                     } else {

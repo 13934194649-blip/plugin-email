@@ -76,9 +76,26 @@ class MailReceivedTriggerTest extends AbstractTriggerTest {
             for (int i = 1; i <= BURST_SIZE; i++) {
                 sendTestEmail("Burst Email " + i, "sender5@example.com", "Burst email body " + i);
             }
+        } else if (testName.equals("unknownCharsetEmailDoesNotFailThePoll")) {
+            sendTestEmail("Good Email 1", "sender9@example.com", "First good email");
+            sendRawTestEmail(
+                "From: sender9@example.com\r\nTo: test@localhost\r\nSubject: Bad charset\r\n"
+                    + "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=x-bogus\r\n\r\nhello\r\n"
+            );
+            sendTestEmail("Good Email 2", "sender9@example.com", "Second good email");
         } else {
             sendTestEmail("First Email", "sender1@example.com", "First test email body");
         }
+    }
+
+    @Test
+    @EvaluateTrigger(flow = "flows/mail-received-trigger-imap.yaml", triggerId = "imap-mail-trigger")
+    void unknownCharsetEmailDoesNotFailThePoll(Optional<Execution> optionalExecution) {
+        assertThat(optionalExecution.isPresent(), is(true));
+
+        Map<String, Object> triggerVars = optionalExecution.get().getTrigger().getVariables();
+
+        assertThat("All emails of the batch should be returned", (Integer) triggerVars.get("total"), is(3));
     }
 
     @Test
